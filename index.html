@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+
+<head>
+	<meta charset="utf-8" />
+	<title>Dashboard</title>
+	<meta name="viewport" content="width=device-width, initial-scale=1" />
+	<link href="output.css" rel="stylesheet" />
+	<!-- svg loader for icons -->
+	<script src="svg-loader.min.js" async></script>
+	<script src="echarts.min.js" async></script>
+	<script src="papaparse.min.js" async></script>
+</head>
+<!-- drawer -->
+
+<body class="drawer min-h-screen bg-base-200 lg:drawer-open">
+	<!-- content -->
+	<main class="drawer-content">
+		<div class="grid grid-cols-12 grid-rows-[min-content] gap-y-12 p-4 lg:gap-x-12 lg:p-10">
+			<!-- header -->
+			<header class="col-span-12 flex items-center gap-2 lg:gap-4">
+				<div class="grow">
+					<h1 class="lg:text-2xl lg:font-light">Finance Tool</h1>
+				</div>
+				<div>
+					<input id="transactionsUpload" type="file"
+						class="file-input file-input-primary file-input-sm w-full max-w-xs" />
+				</div>
+			</header>
+			<!-- /header -->
+			<!-- Month over Month Surplus/Deficit Bar graph -->
+			<!-- Month over Month Running Savings Line graph with trendline -->
+			<!-- Month picker dropdown that updates expense pie chart -->
+			<!-- card -->
+			<section class="card col-span-12 overflow-hidden bg-base-100 shadow-sm">
+				<div class="card-body grow-0">
+					<h2 class="card-title">
+						Budget Surplus/Deficit
+					</h2>
+				</div>
+				<div id="surplus-bar-graph" class="h-96"></div>
+			</section>
+			<!-- /card -->
+			<!-- card -->
+			<section class="card col-span-12 overflow-hidden bg-base-100 shadow-sm">
+				<div class="card-body pb-0">
+					<h2 class="card-title" id="runningTotal">Running Total Savings</h2>
+				</div>
+				<div id="savings-line-graph" class="h-96"></div>
+			</section>
+			<!-- /card -->
+			<!-- card -->
+			<section class="card col-span-12 overflow-hidden bg-base-100 shadow-sm">
+				<div class="card-body pb-0">
+					<h2 class="card-title justify-end flex" id="runningTotal">
+						<p>
+							Expenses
+						</p>
+						<select class="select select-primary w-full max-w-xs" id="pie-chart-selector">
+							<option disabled selected>Select a month</option>
+						</select>
+					</h2>
+				</div>
+				<div id="expense-pie-chart" class="h-96"></div>
+			</section>
+			<!-- /card -->
+		</div>
+	</main>
+	<!-- /content -->
+	<script>
+
+		const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+		let xAxis;
+		let monthlyCategorySum = {};
+		document.getElementById("transactionsUpload").addEventListener("change", (event) => {
+			const file = event.target.files[0];
+			if (!file) return;
+			window.Papa.parse(file, {
+				complete: (results) => {
+					let monthlySum = {};
+					for (let index = 1; index < results.data.length; index++) {
+						const element = results.data[index];
+						const [day, month, year] = element[0].split('/')
+						const amount = Number(element[1]);
+						const category = element[3];
+						const monthIndex = new Date(`${year}-${month}-${day}`).getMonth();
+						monthlySum[monthIndex] = amount + (monthlySum[monthIndex] || 0)
+						const monthName = monthNames[monthIndex];
+						if (!monthlyCategorySum[monthName]) {
+							monthlyCategorySum[monthName] = {};
+						}
+						if (!monthlyCategorySum[monthName][category]) {
+							monthlyCategorySum[monthName][category] = 0;
+						}
+						monthlyCategorySum[monthName][category] += amount;
+
+					}
+					xAxis = Object.keys(monthlySum).map(item => monthNames[item])
+					const raw = Object.values(monthlySum);
+
+					const barData = raw.map(item => {
+						const rounded = Math.round(item, 2);
+						if (rounded > 0) return rounded;
+						return {
+							value: rounded,
+							itemStyle: {
+								color: "#a90000"
+							}
+						}
+					})
+					// Bar Chart
+					const barchart = window.echarts.init(document.getElementById("surplus-bar-graph"));
+					barchart.setOption({
+						tooltip: {
+							trigger: 'axis',
+							axisPointer: {
+								type: 'shadow'
+							}
+						},
+						xAxis: {
+							type: 'category',
+							data: xAxis
+						},
+						yAxis: {
+							type: 'value'
+						},
+						series: [
+							{
+								name: "Surplus/Deficit ($)",
+								barWidth: "60%",
+								data: barData,
+								type: 'bar'
+							}
+						]
+					})
+
+
+					const runningTotal = [];
+					let currentTotal = 0;
+					for (let i = 0; i < raw.length; i++) {
+						currentTotal += raw[i];
+						runningTotal.push(currentTotal);
+					}
+					document.getElementById("runningTotal").innerText = "Running Total Savings: $" + currentTotal
+					// Line Chart
+					const linechart = window.echarts.init(document.getElementById("savings-line-graph"));
+					linechart.setOption({
+						xAxis: {
+							type: 'category',
+							data: xAxis
+						},
+						yAxis: {
+							type: 'value'
+						},
+						series: [
+							{
+								data: runningTotal,
+								type: 'line'
+							}
+						],
+						tooltip: {
+							trigger: 'axis',
+							axisPointer: {
+								type: 'shadow'
+							}
+						},
+					})
+
+					// Pie Chart
+					const pieChartSelector = document.getElementById("pie-chart-selector");
+					xAxis.forEach((month, index) => {
+						const option = document.createElement('option');
+						option.value = month;
+						option.textContent = month;
+						if (index === 0) option.selected = true;
+						pieChartSelector.appendChild(option);
+					})
+
+					// Manually trigger the change event
+					const event = new Event('change');
+					pieChartSelector.dispatchEvent(event);
+				}
+			})
+		})
+		document.getElementById("pie-chart-selector").addEventListener("change", (event) => {
+			const selectedMonth = event.target.value;
+			const expensePieChart = window.echarts.init(document.getElementById("expense-pie-chart"));
+			const selectedMonthData = monthlyCategorySum[selectedMonth];
+			console.log(selectedMonthData)
+			expensePieChart.setOption({
+				tooltip: {
+					trigger: 'item'
+				},
+				legend: {
+					orient: 'vertical',
+					left: 'left'
+				},
+				series: [
+					{
+						name: 'Expense',
+						type: 'pie',
+						radius: ['40%', '70%'],
+						center: ['50%', '70%'],
+						startAngle: 180,
+						endAngle: 360,
+						data: Object.keys(selectedMonthData)
+							.filter(item => selectedMonthData[item] < 0)
+							.map(item => {
+								return { name: item, value: selectedMonthData[item] * -1 }
+							})
+							.sort((a, b) => b.value - a.value),
+						emphasis: {
+							itemStyle: {
+								shadowBlur: 10,
+								shadowOffsetX: 0,
+								shadowColor: 'rgba(0, 0, 0, 0.5)'
+							}
+						}
+					}
+				]
+			})
+		})
+	</script>
+</body>
+<!-- /drawer -->
+
+</html>
